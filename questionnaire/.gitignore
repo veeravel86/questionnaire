@@ -34,3 +34,4 @@ index.faiss
 .env
 .env.*
 .streamlit/secrets.toml
+langchaindemo/
