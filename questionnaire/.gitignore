@@ -1,0 +1,36 @@
+# --- OS / IDE ---
+.DS_Store
+.idea/
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+env/
+venv/
+.python-version
+
+# --- Streamlit / app artifacts ---
+uploads/
+vectorstores/
+*.faiss
+index.faiss
+*.pkl
+*.bin
+*.npy
+*.npz
+
+# --- Data / docs you don’t want in git ---
+*.pdf
+*.doc*
+*.xls*
+*.csv
+*.sqlite*
+
+# --- Secrets ---
+.env
+.env.*
+.streamlit/secrets.toml
