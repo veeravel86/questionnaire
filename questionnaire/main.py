@@ -46,7 +46,7 @@ if not os.getenv("OPENAI_API_KEY"):
 
 try:
     embeddings = OpenAIEmbeddings()
-    llm = ChatOpenAI(model="gpt-4o", temperature=0)
+    llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
     
     pdf_service = PDFService(DB_DIR, embeddings)
     question_service = QuestionService(llm)

@@ -19,7 +19,7 @@ if not os.getenv("OPENAI_API_KEY"):
     st.warning("OPENAI_API_KEY not set. Embeddings/LLM will fail.")
 
 embeddings = OpenAIEmbeddings()
-llm = ChatOpenAI(model="gpt-4o", temperature=0)
+llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
 
 # Initialize services
 pdf_service = PDFService(DB_DIR, embeddings)
