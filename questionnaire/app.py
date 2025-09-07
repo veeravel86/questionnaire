@@ -176,10 +176,72 @@ def evaluate_answers(collection_name: str, qas: list):
         })
     return results
 
+# ---------- Custom Styling ----------
+def apply_section_styling():
+    st.markdown("""
+    <style>
+    .upload-section {
+        background: linear-gradient(135deg, #E3F2FD 0%, #BBDEFB 100%);
+        padding: 25px;
+        border-radius: 15px;
+        border-left: 5px solid #2196F3;
+        margin: 15px 0;
+        box-shadow: 0 2px 10px rgba(33, 150, 243, 0.1);
+    }
+    .index-section {
+        background: linear-gradient(135deg, #E8F5E2 0%, #C8E6C9 100%);
+        padding: 25px;
+        border-radius: 15px;
+        border-left: 5px solid #4CAF50;
+        margin: 15px 0;
+        box-shadow: 0 2px 10px rgba(76, 175, 80, 0.1);
+    }
+    .question-section {
+        background: linear-gradient(135deg, #F3E5F5 0%, #E1BEE7 100%);
+        padding: 25px;
+        border-radius: 15px;
+        border-left: 5px solid #9C27B0;
+        margin: 15px 0;
+        box-shadow: 0 2px 10px rgba(156, 39, 176, 0.1);
+    }
+    .results-section {
+        background: linear-gradient(135deg, #FFF3E0 0%, #FFE0B2 100%);
+        padding: 25px;
+        border-radius: 15px;
+        border-left: 5px solid #FF9800;
+        margin: 15px 0;
+        box-shadow: 0 2px 10px rgba(255, 152, 0, 0.1);
+    }
+    .section-header {
+        color: #1A237E;
+        font-weight: 600;
+        margin-bottom: 15px;
+        font-size: 1.3rem;
+    }
+    .stButton > button {
+        background: linear-gradient(45deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        border-radius: 25px;
+        padding: 0.5rem 1.5rem;
+        font-weight: 500;
+        transition: all 0.3s ease;
+    }
+    .stButton > button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
 # ---------- Streamlit UI ----------
-st.title("PDF Tutor: Index, Questions & Answer Evaluation")
+apply_section_styling()
+st.title("🎓 PDF Tutor: Index, Questions & Answer Evaluation")
 
 # Upload & index section
+st.markdown('<div class="upload-section">', unsafe_allow_html=True)
+st.markdown('<h3 class="section-header">📁 Upload & Index PDF</h3>', unsafe_allow_html=True)
+
 pdf = st.file_uploader("Upload a PDF", type=["pdf"])
 
 if pdf:
@@ -187,11 +249,11 @@ if pdf:
     with open(saved_path, "wb") as f:
         f.write(pdf.getbuffer())
 
-    st.success(f"Saved: {saved_path}")
+    st.success(f"✅ Saved: {saved_path}")
     default_collection = pdf.name.rsplit(".pdf", 1)[0]
     collection = st.text_input("Collection name", value=default_collection)
 
-    with st.expander("Debug info"):
+    with st.expander("🔍 Debug info"):
         st.write({
             "APP_DIR": str(APP_DIR),
             "UPLOAD_DIR": str(UPLOAD_DIR),
@@ -199,26 +261,32 @@ if pdf:
             "saved_path_exists": saved_path.exists(),
         })
 
-    if st.button("Index PDF"):
+    st.markdown('<div class="index-section">', unsafe_allow_html=True)
+    if st.button("🚀 Index PDF"):
         try:
             msg = index_pdf(saved_path, collection)
-            st.success(msg)
+            st.success(f"✅ {msg}")
         except Exception as e:
             st.exception(e)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown('</div>', unsafe_allow_html=True)
 
 # Question generation & answering section
 st.markdown("---")
-st.subheader("Practice: Generate Questions and Submit Answers")
+st.markdown('<div class="question-section">', unsafe_allow_html=True)
+st.markdown('<h3 class="section-header">🎯 Practice: Generate Questions and Submit Answers</h3>', unsafe_allow_html=True)
+
 collections = list_collections()
 if not collections:
-    st.info("No vector stores found yet. Index a PDF above first.")
+    st.info("📚 No vector stores found yet. Index a PDF above first.")
 else:
-    chosen = st.selectbox("Choose collection", options=collections)
-    n_q = st.number_input("How many questions? (max 10)", min_value=1, max_value=10, value=3, step=1)
+    chosen = st.selectbox("📋 Choose collection", options=collections)
+    n_q = st.number_input("❓ How many questions? (max 10)", min_value=1, max_value=10, value=3, step=1)
 
-    if st.button("Generate Questions"):
+    if st.button("✨ Generate Questions"):
         if not os.getenv("OPENAI_API_KEY"):
-            st.error("OPENAI_API_KEY not set.")
+            st.error("🔑 OPENAI_API_KEY not set.")
         else:
             try:
                 st.session_state["questions"] = generate_questions(chosen, int(n_q))
@@ -226,31 +294,48 @@ else:
                 st.exception(e)
 
     if "questions" in st.session_state:
-        st.markdown("### Your Questions")
+        st.markdown("### 📝 Your Questions")
         answers = []
         for idx, q in enumerate(st.session_state["questions"], start=1):
-            st.write(f"{idx}. {q}")
-            ans = st.text_area(f"Your answer to Q{idx}", key=f"ans_{idx}")
+            st.write(f"**{idx}.** {q}")
+            ans = st.text_area(f"💭 Your answer to Q{idx}", key=f"ans_{idx}")
             answers.append((q, ans))
 
-        if st.button("Send Answers"):
+        if st.button("📤 Send Answers"):
+            st.markdown('<div class="results-section">', unsafe_allow_html=True)
+            st.markdown('<h3 class="section-header">📊 Evaluation Results</h3>', unsafe_allow_html=True)
+            
             results = evaluate_answers(chosen, answers)
-            st.markdown("### Evaluation Results")
             total_score = 0
             count = 0
             for r in results:
-                st.write(f"**Q:** {r['question']}")
-                st.write(f"**Your Answer:** {r['answer']}")
-                st.write(f"**Ideal Answer (from context):** {r['ideal_answer']}")
+                st.write(f"**❓ Q:** {r['question']}")
+                st.write(f"**✍️ Your Answer:** {r['answer']}")
+                st.write(f"**💡 Ideal Answer (from context):** {r['ideal_answer']}")
                 if isinstance(r.get("score"), int):
-                    st.success(f"You scored {r['score']} out of 10")
+                    score = r['score']
+                    if score >= 8:
+                        st.success(f"🎉 Excellent! You scored {score} out of 10")
+                    elif score >= 6:
+                        st.warning(f"👍 Good! You scored {score} out of 10")
+                    else:
+                        st.error(f"📚 Needs improvement: {score} out of 10")
                 else:
-                    st.warning("Score unavailable (model returned invalid JSON)")
-                st.write(f"**Reasoning:** {r['reasoning']}")
+                    st.warning("⚠️ Score unavailable (model returned invalid JSON)")
+                st.write(f"**🤔 Reasoning:** {r['reasoning']}")
                 st.markdown("---")
                 if isinstance(r.get("score"), int):
                     total_score += r["score"]
                     count += 1
             if count:
                 avg = round(total_score / count, 2)
-                st.info(f"Average score: {avg} / 10 across {count} question(s)")
+                if avg >= 8:
+                    st.balloons()
+                    st.success(f"🏆 Outstanding! Average score: {avg} / 10 across {count} question(s)")
+                elif avg >= 6:
+                    st.info(f"👏 Well done! Average score: {avg} / 10 across {count} question(s)")
+                else:
+                    st.info(f"📈 Keep practicing! Average score: {avg} / 10 across {count} question(s)")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown('</div>', unsafe_allow_html=True)
