@@ -13,3 +13,10 @@ fastapi==0.115.0
 uvicorn[standard]==0.30.6
 python-multipart==0.0.9  # for file uploads
 requests==2.32.3         # for API client
+
+# Security Dependencies (optional - for secure_main.py)
+passlib[bcrypt]==1.7.4   # password hashing
+python-jose[cryptography]==3.3.0  # JWT tokens
+redis==5.0.0             # rate limiting storage
+slowapi==0.1.9           # rate limiting
+python-dotenv==1.0.1     # environment variables
