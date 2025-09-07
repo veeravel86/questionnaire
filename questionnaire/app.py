@@ -1,23 +1,11 @@
 import os
-import re
-import json
 from pathlib import Path
 import streamlit as st
 
-# Loaders & vector store
-from langchain_community.document_loaders import PyPDFLoader
-try:
-    from langchain_community.document_loaders import PyMuPDFLoader  # requires: pip install pymupdf
-    HAS_PYMUPDF = True
-except Exception:
-    HAS_PYMUPDF = False
-
-from pypdf.errors import DependencyError as PdfDependencyError
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import FAISS
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
+from services.pdf_service import PDFService
+from services.question_service import QuestionService
+from services.evaluation_service import EvaluationService
 
 # ---------- Paths ----------
 APP_DIR = Path(__file__).parent if "__file__" in globals() else Path.cwd()
@@ -33,148 +21,13 @@ if not os.getenv("OPENAI_API_KEY"):
 embeddings = OpenAIEmbeddings()
 llm = ChatOpenAI(model="gpt-4o", temperature=0)
 
-# ---------- Indexing Logic ----------
-
-def _load_pdf_docs(abs_path: Path):
-    try:
-        return PyPDFLoader(str(abs_path)).load()
-    except PdfDependencyError:
-        if HAS_PYMUPDF:
-            st.info("PyPDF needs 'cryptography' for AES. Falling back to PyMuPDF loader…")
-            return PyMuPDFLoader(str(abs_path)).load()
-        else:
-            st.error("This PDF appears to use AES encryption. Install 'cryptography' or 'pymupdf'.")
-            raise
-    except Exception as e:
-        if HAS_PYMUPDF:
-            st.info(f"PyPDF failed with: {e}. Trying PyMuPDF loader…")
-            return PyMuPDFLoader(str(abs_path)).load()
-        raise
+# Initialize services
+pdf_service = PDFService(DB_DIR, embeddings)
+question_service = QuestionService(llm)
+evaluation_service = EvaluationService(llm)
 
 
-def index_pdf(file_path: Path, collection_name: str) -> str:
-    abs_path = Path(str(file_path).strip().strip("'\" ")).resolve()
-    if not abs_path.exists():
-        raise FileNotFoundError(f"PDF file not found at {abs_path}")
 
-    docs = _load_pdf_docs(abs_path)
-    splitter = RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=120)
-    chunks = splitter.split_documents(docs)
-
-    vs = FAISS.from_documents(chunks, embedding=embeddings)
-    vs.save_local(str(DB_DIR / collection_name))
-
-    return f"Indexed '{abs_path.name}' into collection '{collection_name}' at {DB_DIR / collection_name}"
-
-# ---------- Question Generation ----------
-QUESTION_GEN_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", """
-You are a helpful tutor. Generate {n} diverse, open-ended study questions based only on the provided book context.
-Vary difficulty from easy to hard. Output as a numbered list.
-Context:
----
-{context}
----
-"""),
-])
-
-# --- Helpers for parsing model JSON and building ideal answers ---
-RAG_ANSWER_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", """
-Using ONLY the provided context, write a concise, high-quality ideal answer to the question.
-If the context is insufficient, say so and answer partially.
-Context:
----
-{context}
----
-Question: {question}
-Return only the answer text.
-"""),
-])
-
-EVAL_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", """
-You are a strict but fair grader. Use ONLY the provided context to evaluate the student's answer.
-Return ONE JSON object with exactly these keys:
-- score: integer in [1,10]
-- reasoning: string (1-3 sentences)
-No markdown, no code fences, no extra text.
-"""),
-    ("user", """
-Question: {question}
-Student answer: {answer}
-Reference context:
-{context}
-Return JSON now.
-"""),
-])
-
-def _extract_json(s: str) -> dict:
-    s = s.strip()
-    s = re.sub(r"^```(?:json)?\\s*|```$", "", s, flags=re.IGNORECASE|re.MULTILINE).strip()
-    if "{" in s and "}" in s:
-        s = s[s.find("{"): s.rfind("}")+1]
-    try:
-        return json.loads(s)
-    except Exception:
-        return {"score": None, "reasoning": s}
-
-# ---------- Collection Helpers ----------
-def list_collections():
-    if not DB_DIR.exists():
-        return []
-    return [p.name for p in DB_DIR.iterdir() if p.is_dir() and ((p / "index.faiss").exists() or any(p.glob("*.faiss")))]
-
-
-def load_vs(collection_name: str) -> FAISS:
-    store_dir = DB_DIR / collection_name
-    if not store_dir.exists():
-        raise FileNotFoundError(f"No vector store for '{collection_name}'.")
-    return FAISS.load_local(str(store_dir), embeddings, allow_dangerous_deserialization=True)
-
-
-def generate_questions(collection_name: str, n: int = 5, k: int = 8) -> list:
-    n = max(1, min(10, int(n)))
-    vs = load_vs(collection_name)
-    retriever = vs.as_retriever(search_type="mmr", search_kwargs={"k": k, "fetch_k": max(16, k*2)})
-    docs = retriever.get_relevant_documents("overview key concepts from the book")
-    context = "\n\n".join(d.page_content for d in docs)
-    chain = (QUESTION_GEN_PROMPT | llm | StrOutputParser())
-    raw = chain.invoke({"n": n, "context": context})
-    questions = [q.strip() for q in raw.split("\n") if q.strip()]
-    return questions[:n]
-
-
-def evaluate_answers(collection_name: str, qas: list):
-    vs = load_vs(collection_name)
-    results = []
-    for q, a in qas:
-        retriever = vs.as_retriever(search_kwargs={"k": 6})
-        docs = retriever.get_relevant_documents(q)
-        context = "\n\n".join(d.page_content for d in docs)
-        # Ideal answer from context
-        ideal = (RAG_ANSWER_PROMPT | llm | StrOutputParser()).invoke({"question": q, "context": context}).strip()
-        # Grade strictly as JSON
-        raw = (EVAL_PROMPT | llm | StrOutputParser()).invoke({
-            "question": q,
-            "answer": a or "",
-            "context": context,
-        })
-        parsed = _extract_json(raw)
-        try:
-            score_val = int(round(float(parsed.get("score", 0))))
-        except Exception:
-            score_val = None
-        if isinstance(score_val, int):
-            score_val = max(1, min(10, score_val))
-        results.append({
-            "question": q,
-            "answer": a,
-            "ideal_answer": ideal,
-            "score": score_val,
-            "reasoning": parsed.get("reasoning"),
-        })
-    return results
 
 # ---------- Custom Styling ----------
 def apply_section_styling():
@@ -264,7 +117,7 @@ if pdf:
     st.markdown('<div class="index-section">', unsafe_allow_html=True)
     if st.button("🚀 Index PDF"):
         try:
-            msg = index_pdf(saved_path, collection)
+            msg = pdf_service.index_pdf(saved_path, collection)
             st.success(f"✅ {msg}")
         except Exception as e:
             st.exception(e)
@@ -277,7 +130,7 @@ st.markdown("---")
 st.markdown('<div class="question-section">', unsafe_allow_html=True)
 st.markdown('<h3 class="section-header">🎯 Practice: Generate Questions and Submit Answers</h3>', unsafe_allow_html=True)
 
-collections = list_collections()
+collections = pdf_service.list_collections()
 if not collections:
     st.info("📚 No vector stores found yet. Index a PDF above first.")
 else:
@@ -289,7 +142,8 @@ else:
             st.error("🔑 OPENAI_API_KEY not set.")
         else:
             try:
-                st.session_state["questions"] = generate_questions(chosen, int(n_q))
+                vs = pdf_service.load_vectorstore(chosen)
+                st.session_state["questions"] = question_service.generate_questions(vs, int(n_q))
             except Exception as e:
                 st.exception(e)
 
@@ -305,7 +159,8 @@ else:
             st.markdown('<div class="results-section">', unsafe_allow_html=True)
             st.markdown('<h3 class="section-header">📊 Evaluation Results</h3>', unsafe_allow_html=True)
             
-            results = evaluate_answers(chosen, answers)
+            vs = pdf_service.load_vectorstore(chosen)
+            results = evaluation_service.evaluate_answers(vs, answers)
             total_score = 0
             count = 0
             for r in results:
